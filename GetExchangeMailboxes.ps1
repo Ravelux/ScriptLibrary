@@ -1,0 +1,1 @@
+Get-Mailbox -ResultSize Unlimited | Select-Object DisplayName, SamAccountName, PrimarySmtpAddress | Sort-Object PrimarySmtpAddress | Export-Csv "c:\output\display_sam_smtp.csv" -NoTypeInformation -Encoding UTF8
