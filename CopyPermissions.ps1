@@ -1,0 +1,1 @@
+robocopy SOURCE DESTINATION /e /sec /secfix /xo /xn /xc
