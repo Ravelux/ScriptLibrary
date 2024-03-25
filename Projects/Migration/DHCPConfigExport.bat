@@ -1,0 +1,1 @@
+netsh dhcp server export c:\dhcpDB.dat all
