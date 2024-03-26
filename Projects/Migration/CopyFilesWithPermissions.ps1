@@ -1,0 +1,1 @@
+robocopy SOURCE DESTINATION /MIR /V /NP /R:2 /W:1 /SEC
