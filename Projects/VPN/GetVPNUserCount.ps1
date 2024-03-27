@@ -1,4 +1,4 @@
-# Dieses PowerShell-Skript gibt die Anzahl der Benutzer in der AD-Gruppe "grp.vpn" aus.
+# Dieses PowerShell-Skript gibt die Anzahl der aktiven Benutzer in der AD-Gruppe "grp.vpn" aus.
 
 # Gruppenname
 $groupName = "grp.vpn"
@@ -6,11 +6,19 @@ $groupName = "grp.vpn"
 # Abfrage der Gruppenmitglieder
 $groupMembers = Get-ADGroupMember -Identity $groupName
 
-# Filtern der Benutzer aus den Gruppenmitgliedern
-$users = $groupMembers | Where-Object { $_.objectClass -eq "user" }
+# Filtern der aktiven Benutzer aus den Gruppenmitgliedern
+$activeUsers = $groupMembers | Where-Object { $_.objectClass -eq "user" } | ForEach-Object {
+    # Abfrage des Benutzerkontos, um den Status zu überprüfen
+    $user = Get-ADUser -Identity $_.distinguishedName -Properties userAccountControl
+    
+    # Überprüfung, ob das Konto aktiv ist (das ACCOUNTDISABLE Flag ist nicht gesetzt)
+    if (($user.userAccountControl -band 2) -eq 0) {
+        return $user
+    }
+}
 
-# Anzahl der Benutzer in der Gruppe
-$numberOfUsers = $users.Count
+# Anzahl der aktiven Benutzer in der Gruppe
+$numberOfActiveUsers = $activeUsers.Count
 
-# Ausgabe der Anzahl
-Write-Host "Anzahl der Benutzer in der Gruppe '$groupName': $numberOfUsers"
+# Ausgabe der Anzahl der aktiven Benutzer
+Write-Host "Anzahl der aktiven Benutzer in der Gruppe '$groupName': $numberOfActiveUsers"
