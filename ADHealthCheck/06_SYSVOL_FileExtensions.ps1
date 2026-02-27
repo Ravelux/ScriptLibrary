@@ -1,4 +1,29 @@
 # 06_SYSVOL_FileExtensions.ps1
+# === Common Header ===
+$ErrorActionPreference = "Stop"
+
+function Read-YesNo {
+  param(
+    [Parameter(Mandatory=$true)][string]$Question,
+    [bool]$DefaultNo = $true
+  )
+  $suffix = if ($DefaultNo) { " (j/N)" } else { " (J/n)" }
+  $a = Read-Host ($Question + $suffix)
+  if ([string]::IsNullOrWhiteSpace($a)) { return (-not $DefaultNo) }
+  return ($a -match '^(j|ja|y|yes)$')
+}
+
+# Domain automatisch (falls AD Module später gebraucht werden)
+$DomainDns = if ($env:USERDNSDOMAIN) { $env:USERDNSDOMAIN } else { $null }
+
+# Report-Basis
+$ts = Get-Date -Format "yyyyMMdd-HHmmss"
+$BaseReportDir = if ($DomainDns) {
+  "C:\Temp\AD-Healthcheck-Reports\$DomainDns\$ts"
+} else {
+  "C:\Temp\AD-Healthcheck-Reports\_nodomain_\$ts"
+}
+New-Item -ItemType Directory -Path $BaseReportDir -Force | Out-Null
 # Paste Common Header above this line first
 
 Import-Module ActiveDirectory -ErrorAction Stop
