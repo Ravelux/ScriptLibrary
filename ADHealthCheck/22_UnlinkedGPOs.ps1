@@ -75,8 +75,9 @@ function Get-UnlinkedGpos {
   }
 }
 
-function Ensure-Folder {
-  param([string]$Path)
+function Initialize-Folder {
+  param([Parameter(Mandatory)][string]$Path)
+
   if (-not (Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
   }
@@ -89,7 +90,7 @@ function Backup-OneGpo {
     [string]$DestPath
   )
 
-  Ensure-Folder -Path $DestPath
+  Initialize-Folder -Path $DestPath
 
   Backup-GPO -Guid $GpoId -Domain $DomainName -Path $DestPath -ErrorAction Stop | Out-Null
 }
@@ -140,7 +141,7 @@ if ($Interactive) {
   if ($choice -match '^[Qq]$') { return }
 
   if ($choice -match '^[Aa]$') {
-    Ensure-Folder -Path $BackupPath
+    Initialize-Folder -Path $BackupPath
     foreach ($g in $unlinked) {
       Write-Host "Backup: $($g.DisplayName)"
       Backup-OneGpo -DomainName $Domain -GpoId $g.Id -DestPath $BackupPath
@@ -189,7 +190,7 @@ if ($Interactive) {
       return
     }
 
-    Ensure-Folder -Path $BackupPath
+    Initialize-Folder -Path $BackupPath
 
     foreach ($g in $targets) {
       Write-Host ""
@@ -224,7 +225,7 @@ if ($Interactive) {
 
 # Non-interaktiv Delete/Backup
 if ($Delete) {
-  Ensure-Folder -Path $BackupPath
+  Initialize-Folder -Path $BackupPath
 
   foreach ($g in $unlinked) {
     Write-Host "Backup: $($g.DisplayName)"
