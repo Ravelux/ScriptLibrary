@@ -410,7 +410,13 @@ try {
 $deleted = ($summary | Where-Object { $_.Action -eq "DELETED" } | Select-Object -ExpandProperty Computer)
 $moved = ($summary | Where-Object { $_.Action -eq "MOVED" } | Select-Object -ExpandProperty Computer)
 $exceptions = ($summary | Where-Object { $_.Action -eq "EXCEPTION" } | Select-Object -ExpandProperty Computer)
-$blocked = ($summary | Where-Object { $_.Action -eq "BLOCKED" } | Select-Object -ExpandProperty Computer)
+
+# BLOCKED + SKIP gemeinsam (inkl. "nicht im AD gefunden", "manuell übersprungen", "Verschieben abgelehnt", etc.)
+$blockedOrSkipped = (
+  $summary |
+  Where-Object { $_.Action -in @("BLOCKED","SKIP") } |
+  Select-Object -ExpandProperty Computer
+)
 
 Write-Host ""
 Write-Host "EOL Geräte (Input-Liste):"
@@ -429,5 +435,5 @@ Write-Host "Als Ausnahme markiert (manuell in ITGlue eintragen):"
 if ($exceptions.Count -gt 0) { $exceptions | ForEach-Object { Write-Host "  - $_" } } else { Write-Host "  - (keine)" }
 
 Write-Host ""
-Write-Host "Blockiert (Ninja online oder Lager-Gerät):"
-if ($blocked.Count -gt 0) { $blocked | ForEach-Object { Write-Host "  - $_" } } else { Write-Host "  - (keine)" }
+Write-Host "Blockiert/übersprungene Geräte (Ninja online, vor kurzem Online oder Lager-Gerät):"
+if ($blockedOrSkipped.Count -gt 0) { $blockedOrSkipped | Sort-Object -Unique | ForEach-Object { Write-Host "  - $_" } } else { Write-Host "  - (keine)" }
