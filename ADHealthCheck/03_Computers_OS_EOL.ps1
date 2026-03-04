@@ -83,8 +83,12 @@ function Read-Choice {
   }
 }
 
-function Ensure-DeactivatedOU {
-  param([Parameter(Mandatory=$true)][string]$OUName)
+function Get-DeactivatedOU {
+  [CmdletBinding(SupportsShouldProcess = $true)]
+  param(
+    [Parameter(Mandatory=$true)]
+    [string]$OUName
+  )
 
   $domain = Get-ADDomain
   $baseDn = $domain.DistinguishedName
@@ -92,7 +96,7 @@ function Ensure-DeactivatedOU {
   $ou = Get-ADOrganizationalUnit -LDAPFilter "(ou=$OUName)" -SearchBase $baseDn -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($ou) { return $ou.DistinguishedName }
 
-  if ($PSCmdlet.ShouldProcess($baseDn, "OU '$OUName' anlegen")) {
+  if ($PSCmdlet.ShouldProcess($baseDn, "Create OU '$OUName'")) {
     New-ADOrganizationalUnit -Name $OUName -Path $baseDn -ProtectedFromAccidentalDeletion $true | Out-Null
   }
 
@@ -163,7 +167,7 @@ if (-not $checkedTicket) {
 $targets = Get-TargetComputers -InputFile $InputFile -ComputerName $ComputerName
 if (-not $targets -or $targets.Count -eq 0) { throw "Keine Computer gefunden/übergeben." }
 
-$deactivatedOuDn = Ensure-DeactivatedOU -OUName $DeactivatedOUName
+$deactivatedOuDn = Get-DeactivatedOU -OUName $DeactivatedOUName
 $now = Get-Date
 
 $summary = New-Object System.Collections.Generic.List[object]
