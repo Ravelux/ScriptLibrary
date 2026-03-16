@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx skills:*)"
+      "Bash(npx skills:*)",
+      "Bash(find /z/Schwabbel-Tools -type f -name *.js)"
     ]
   }
 }
