@@ -10,10 +10,8 @@ try {
     $svc = Get-Service -Name "Netlogon"
     Write-Host "    Status   : $($svc.Status)"
     Write-Host "    Starttyp : $($svc.StartType)"
-    $netlogonOK = $svc.Status -eq "Running"
 } catch {
     Write-Warning "    Netlogon-Abfrage fehlgeschlagen: $_"
-    $netlogonOK = $false
 }
 
 # 2. DCDiag Advertising
