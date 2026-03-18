@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npx skills:*)",
-      "Bash(find /z/Schwabbel-Tools -type f -name *.js)"
+      "Bash(find /z/Schwabbel-Tools -type f -name *.js)",
+      "Bash(find z:/Schwabbel-Tools -name *.yml -o -name *.yaml -o -name Caddyfile -o -name nginx.conf -o -name *.conf)"
     ]
   }
 }
