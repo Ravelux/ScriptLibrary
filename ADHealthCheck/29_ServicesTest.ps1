@@ -12,8 +12,8 @@ param(
 
 # --- Zielsystem bestimmen ---
 if (-not $TargetComputer) {
-    $input = Read-Host "Ziel-DC eingeben (leer lassen fuer lokalen Computer: $env:COMPUTERNAME)"
-    $TargetComputer = if ($input) { $input } else { $env:COMPUTERNAME }
+    $userInput = Read-Host "Ziel-DC eingeben (leer lassen fuer lokalen Computer: $env:COMPUTERNAME)"
+    $TargetComputer = if ($userInput) { $userInput } else { $env:COMPUTERNAME }
 }
 
 $isRemote = ($TargetComputer -ne $env:COMPUTERNAME)
