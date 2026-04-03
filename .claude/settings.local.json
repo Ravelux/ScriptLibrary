@@ -3,7 +3,18 @@
     "allow": [
       "Bash(npx skills:*)",
       "Bash(find /z/Schwabbel-Tools -type f -name *.js)",
-      "Bash(find z:/Schwabbel-Tools -name *.yml -o -name *.yaml -o -name Caddyfile -o -name nginx.conf -o -name *.conf)"
+      "Bash(find z:/Schwabbel-Tools -name *.yml -o -name *.yaml -o -name Caddyfile -o -name nginx.conf -o -name *.conf)",
+      "WebSearch",
+      "WebFetch(domain:marketplace.visualstudio.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh search:*)",
+      "Bash(gh api:*)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(r[''''full_name''''], r[''''description''''], r[''''html_url'''']\\) for r in data.get\\(''''items'''',[]\\)]\")",
+      "WebFetch(domain:skillsmp.com)",
+      "WebFetch(domain:www.openjarvis.org)",
+      "Bash(python3:*)",
+      "Bash(pip list:*)",
+      "Bash(python \"Z:\\\\Ticket_Export\\\\ticket_auswertung.py\")"
     ]
   }
 }
