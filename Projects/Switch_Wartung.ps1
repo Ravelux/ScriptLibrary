@@ -293,8 +293,115 @@ function Start-ArubaConfigBackup {
     Write-OK "Log aktualisiert: $logFile"
 }
 
+
+function Get-ArubaVLANs {
+    # Eigene SSH-Session fuer VLANs – frische Verbindung, kein Buffer-Problem
+    param([string]$IP, [PSCredential]$Credential, [string]$VlanDir)
+    Write-Step "VLANs abfragen (neue Session)..."
+
+    # Neue dedizierte Session aufbauen
+    $sid = New-ArubaSession -IP $IP -Credential $Credential
+    if ($sid -lt 0) { Write-Warn "VLAN-Session fehlgeschlagen"; return }
+
+    $vlanStream = New-ArubaStream -SessionId $sid
+    if (-not $vlanStream) {
+        Remove-SSHSession -SessionId $sid | Out-Null
+        Write-Warn "VLAN-Stream fehlgeschlagen"
+        return
+    }
+
+    try {
+        # show vlans – gibt Tabelle mit VLAN-ID, Name, Status
+        $output = Invoke-ArubaCommand -Stream $vlanStream -Command "show vlans" -WaitMs 4000
+
+        if (-not $output) { Write-Warn "Keine VLAN-Ausgabe"; return }
+
+        # VLAN-IDs + Namen aus Übersichtstabelle extrahieren
+        # Aruba Format: "  1    DEFAULT_VLAN         Port-based  ..."
+        $vlanNames = @{}
+        $vlanIdList = [System.Collections.Generic.List[int]]::new()
+
+        foreach ($line in $output) {
+            if ($line -match "^\s{0,5}(\d+)\s+(\S+)") {
+                $vid2 = [int]$Matches[1]
+                $nm2  = $Matches[2].Trim()
+                if (-not $vlanIdList.Contains($vid2)) {
+                    $vlanIdList.Add($vid2)
+                    $vlanNames[$vid2] = $nm2
+                }
+            }
+        }
+
+        if ($vlanIdList.Count -eq 0) { Write-Warn "Keine VLANs in Ausgabe gefunden"; return }
+
+        $results = [System.Collections.Generic.List[PSObject]]::new()
+
+
+        foreach ($vid in $vlanIdList) {
+            # Buffer leeren vor jedem VLAN-Abruf
+            $vlanStream.WriteLine("")
+            Start-Sleep -Milliseconds 800
+            $vlanStream.Read() | Out-Null
+
+            $detail   = Invoke-ArubaCommand -Stream $vlanStream -Command "show vlans $vid" -WaitMs 5000
+            $name     = if ($vlanNames.ContainsKey($vid)) { $vlanNames[$vid] } else { "VLAN$vid" }
+            $tagged   = @()
+            $untagged = @()
+
+            if ($detail) {
+                # Name aus show vlans Detailausgabe (Fallback: aus Übersicht)
+                $nameLine = $detail | Where-Object { $_ -match "^Name\s*:" } | Select-Object -First 1
+                if ($nameLine -match "^Name\s*:\s*(.+)") {
+                    $name = $Matches[1].Trim()
+                } elseif ($vlanNames.ContainsKey($vid)) {
+                    $name = $vlanNames[$vid]
+                }
+
+                # Port-Parsing: Aruba Format pro Zeile:
+                # "  14    Untagged   Learn   Up"
+                # "  1     Tagged     Learn   Up"
+                # Portnummer ist die erste Zahl, Mode steht in Spalte 2
+                foreach ($line in $detail) {
+                    if ($line -match "^\s{0,6}(\d+)\s+(Tagged|Untagged)\s+") {
+                        $portNum = $Matches[1]
+                        $mode2   = $Matches[2]
+                        if ($mode2 -eq "Tagged")   { $tagged   += $portNum }
+                        if ($mode2 -eq "Untagged") { $untagged += $portNum }
+                    }
+                }
+            }
+
+            $taggedStr   = if ($tagged)   { $tagged   -join ", " } else { "-" }
+            $untaggedStr = if ($untagged) { $untagged -join ", " } else { "-" }
+
+            Write-Host ("   VLAN {0,4}  [{1,-20}]  Tagged: {2,-30}  Untagged: {3}" -f $vid, $name, $taggedStr, $untaggedStr)
+
+            $results.Add([PSCustomObject]@{
+                IP       = $IP
+                VLAN_ID  = $vid
+                Name     = $name
+                Tagged   = $taggedStr
+                Untagged = $untaggedStr
+            })
+        }
+
+        # CSV speichern
+        if (-not (Test-Path $VlanDir)) { New-Item -ItemType Directory -Path $VlanDir -Force | Out-Null }
+        $safeIP  = $IP -replace "\.", "-"
+        $date    = Get-Date -Format "yyyy-MM-dd"
+        $csvPath = Join-Path $VlanDir "vlans_${safeIP}_${date}.csv"
+        $results | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+        Write-OK "VLAN-CSV gespeichert: $csvPath"
+
+    } finally {
+        $vlanStream.Dispose()
+        Remove-SSHSession -SessionId $sid | Out-Null
+        Write-Host "   [..] VLAN-Session geschlossen" -ForegroundColor Gray
+    }
+}
+
 function Start-ArubaWartung {
-    param([string]$IP, [PSCredential]$Credential, [string]$BackupDir)
+    param([string]$IP, [PSCredential]$Credential, [string]$BackupDir, [string]$VlanDir)
     Write-Header "Aruba Switch: $IP"
 
     $sessionId = New-ArubaSession -IP $IP -Credential $Credential
@@ -314,6 +421,7 @@ function Start-ArubaWartung {
         Get-ArubaLatestFirmware -InstalledVersion $installedFW
         Get-ArubaUptime         -Stream $stream
         Start-ArubaConfigBackup -Stream $stream -IP $IP -BackupDir $BackupDir
+        Get-ArubaVLANs          -Stream $stream -IP $IP -VlanDir $VlanDir
 
         $stream.Dispose()
     } finally {
@@ -561,7 +669,7 @@ function Get-SnmpValue {
 }
 
 function Get-HPESNMPInfo {
-    param([string]$IP, [string]$Community = "public")
+    param([string]$IP, [string]$Community = "public", [string]$VlanDir)
     Write-Step "SNMP-Abfrage ($IP, Community: $Community)..."
 
     $sysDescr  = Get-SnmpValue -IP $IP -Community $Community -OID "1.3.6.1.2.1.1.1.0"
@@ -754,6 +862,200 @@ function Get-SnmpValue {
     }
 }
 
+
+function Get-SnmpNextValue {
+    # SNMP GetNext Request – gibt nächste OID + Wert zurück
+    param([string]$IP, [string]$Community = "public", [string]$OID, [int]$TimeoutMs = 1500)
+    try {
+        $oidParts = $OID.TrimStart('.') -split '\.' | ForEach-Object { [int]$_ }
+        $oidBytes = [System.Collections.Generic.List[byte]]::new()
+        $oidBytes.Add([byte](40 * $oidParts[0] + $oidParts[1]))
+        for ($i = 2; $i -lt $oidParts.Count; $i++) {
+            $val = $oidParts[$i]
+            if ($val -lt 128) { $oidBytes.Add([byte]$val) }
+            else {
+                $sub = [System.Collections.Generic.List[byte]]::new()
+                while ($val -gt 0) { $sub.Insert(0, [byte]($val -band 0x7F)); $val = [int][math]::Floor($val / 128) }
+                for ($j = 0; $j -lt $sub.Count - 1; $j++) { $oidBytes.Add($sub[$j] -bor 0x80) }
+                $oidBytes.Add($sub[$sub.Count - 1])
+            }
+        }
+
+        function Get-BerLen([int]$n) {
+            if ($n -lt 128) { return [byte[]]@($n) }
+            $b = [System.Collections.Generic.List[byte]]::new()
+            $tmp = $n
+            while ($tmp -gt 0) { $b.Insert(0, [byte]($tmp -band 0xFF)); $tmp = [int][math]::Floor($tmp / 256) }
+            $b.Insert(0, [byte](0x80 -bor $b.Count))
+            return $b.ToArray()
+        }
+
+        $commBytes  = [System.Text.Encoding]::ASCII.GetBytes($Community)
+        $oidTlv     = @([byte]0x06) + (Get-BerLen $oidBytes.Count) + $oidBytes.ToArray()
+        $nullTlv    = [byte[]]@(0x05, 0x00)
+        $varBind    = @([byte]0x30) + (Get-BerLen ($oidTlv.Count + $nullTlv.Count)) + $oidTlv + $nullTlv
+        $vbl        = @([byte]0x30) + (Get-BerLen $varBind.Count) + $varBind
+        $pduContent = [byte[]]@(0x02,0x01,0x01, 0x02,0x01,0x00, 0x02,0x01,0x00) + $vbl
+        $pdu        = @([byte]0xA1) + (Get-BerLen $pduContent.Count) + $pduContent  # 0xA1 = GetNext
+        $commTlv    = @([byte]0x04) + (Get-BerLen $commBytes.Count) + $commBytes
+        $msgContent = [byte[]]@(0x02,0x01,0x01) + $commTlv + $pdu
+        $packet     = @([byte]0x30) + (Get-BerLen $msgContent.Count) + $msgContent
+
+        $udp = New-Object System.Net.Sockets.UdpClient
+        $udp.Client.ReceiveTimeout = $TimeoutMs
+        $ep  = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Parse($IP), 161)
+        $udp.Send([byte[]]$packet, $packet.Count, $ep) | Out-Null
+        $remoteEP = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+        $resp = $udp.Receive([ref]$remoteEP)
+        $udp.Close()
+
+        if (-not $resp -or $resp.Count -eq 0) { return $null }
+
+        # Response-OID dekodieren
+        $pos = 0
+        # Überspringe äußere TLVs bis zur ersten OID (Tag 0x06)
+        for ($i = 0; $i -lt $resp.Count - 1; $i++) {
+            if ($resp[$i] -eq 0x06) {
+                $oidLen = [int]$resp[$i+1]
+                $oidRaw = $resp[($i+2)..($i+1+$oidLen)]
+                # OID dekodieren
+                $decoded = [System.Collections.Generic.List[string]]::new()
+                $first = [int]$oidRaw[0]
+                $decoded.Add([string][int]($first / 40))
+                $decoded.Add([string]($first % 40))
+                $j = 1
+                while ($j -lt $oidRaw.Count) {
+                    $val2 = 0
+                    while ($j -lt $oidRaw.Count -and ($oidRaw[$j] -band 0x80)) {
+                        $val2 = ($val2 -shl 7) -bor ($oidRaw[$j] -band 0x7F); $j++
+                    }
+                    if ($j -lt $oidRaw.Count) { $val2 = ($val2 -shl 7) -bor $oidRaw[$j]; $j++ }
+                    $decoded.Add([string]$val2)
+                }
+                $responseOID = $decoded -join "."
+
+                # Wert nach der OID lesen
+                $valPos = $i + 2 + $oidLen
+                if ($valPos -lt $resp.Count) {
+                    $valTag = $resp[$valPos]; $valPos++
+                    $valLen = [int]$resp[$valPos]; $valPos++
+                    $value = $null
+                    if ($valTag -eq 0x04) {
+                        $value = [System.Text.Encoding]::ASCII.GetString($resp[$valPos..($valPos+$valLen-1)]).Trim()
+                    } elseif ($valTag -eq 0x06) {
+                        $value = $resp[$valPos..($valPos+$valLen-1)]  # OID als bytes
+                    } else {
+                        $value = $resp[$valPos..($valPos+$valLen-1)]  # raw bytes
+                    }
+                    return @{ OID = $responseOID; Value = $value; Tag = $valTag }
+                }
+                break
+            }
+        }
+        return $null
+    } catch { return $null }
+}
+
+function Get-HPEVLANsSNMP {
+    param([string]$IP, [string]$Community = "public", [string]$VlanDir)
+    Write-Step "VLANs abfragen (SNMP)..."
+
+    # dot1qVlanStaticName: 1.3.6.1.2.1.17.7.1.4.3.1.1.<vlanId>
+    # dot1qVlanStaticEgressPorts (alle Ports): 1.3.6.1.2.1.17.7.1.4.3.1.2.<vlanId>
+    # dot1qVlanStaticUntaggedPorts: 1.3.6.1.2.1.17.7.1.4.3.1.4.<vlanId>
+
+    # SNMP Walk simulieren: VLANs 1-4094 abfragen (nur die die antworten)
+    # Für OfficeConnect realistisch: VLANs 1-100 prüfen
+    $results = [System.Collections.Generic.List[PSObject]]::new()
+
+    # Bekannte VLANs via dot1qVlanFdbId Walk (OID .1.3.6.1.2.1.17.7.1.4.2.1.2)
+    # Einfacher: direkt VLANs 1-4094 per GetNext simulieren durch feste OID-Liste
+    # Wir versuchen für jede VLAN-ID 1-4094 den Namen – leere Antwort = kein VLAN
+
+    function Get-PortsFromBitmap([byte[]]$bitmap) {
+        $ports = [System.Collections.Generic.List[int]]::new()
+        for ($byteIdx = 0; $byteIdx -lt $bitmap.Count; $byteIdx++) {
+            for ($bit = 7; $bit -ge 0; $bit--) {
+                if ($bitmap[$byteIdx] -band (1 -shl $bit)) {
+                    $ports.Add($byteIdx * 8 + (7 - $bit) + 1)
+                }
+            }
+        }
+        return $ports.ToArray()
+    }
+
+    # SNMP Walk über dot1qVlanStaticName – nur existierende VLANs antworten
+    # Wir holen alle VLANs auf einmal via aufeinanderfolgenden GetNext-Requests
+    # Einfacher Ansatz: OID-Prefix abfragen und solange weiter bis OID-Bereich verlassen
+    Write-Host "   Lese existierende VLANs via SNMP Walk..." -ForegroundColor Gray
+
+    $baseNameOID   = "1.3.6.1.2.1.17.7.1.4.3.1.1"
+    $baseEgressOID = "1.3.6.1.2.1.17.7.1.4.3.1.2"
+    $baseUntagOID  = "1.3.6.1.2.1.17.7.1.4.3.1.4"
+
+    # Existierende VLAN-IDs ermitteln: GetNext-Walk über Name-OID
+    $vlanIds = [System.Collections.Generic.List[int]]::new()
+    $currentOID = $baseNameOID
+
+    for ($attempt = 0; $attempt -lt 256; $attempt++) {
+        $nextResult = Get-SnmpNextValue -IP $IP -Community $Community -OID $currentOID
+        if (-not $nextResult) { break }
+        if (-not $nextResult.OID.StartsWith($baseNameOID + ".")) { break }  # OID-Bereich verlassen
+
+        $vlanId = [int]($nextResult.OID.Split(".")[-1])
+        $vlanIds.Add($vlanId)
+        $currentOID = $nextResult.OID
+    }
+
+    if ($vlanIds.Count -eq 0) {
+        Write-Warn "Keine VLANs via SNMP gefunden – Bridge-MIB moeglicherweise nicht unterstuetzt"
+        return
+    }
+
+    Write-Host "   $($vlanIds.Count) VLANs gefunden: $($vlanIds -join ', ')" -ForegroundColor Gray
+
+    foreach ($vid in $vlanIds) {
+        $vlanName  = Get-SnmpValue -IP $IP -Community $Community -OID "$baseNameOID.$vid"  -TimeoutMs 1500
+        $egressRaw = Get-SnmpValue -IP $IP -Community $Community -OID "$baseEgressOID.$vid" -TimeoutMs 1500
+        $untagRaw  = Get-SnmpValue -IP $IP -Community $Community -OID "$baseUntagOID.$vid"  -TimeoutMs 1500
+
+        $taggedPorts   = "-"
+        $untaggedPorts = "-"
+
+        if ($egressRaw -is [byte[]]) {
+            $allPorts = Get-PortsFromBitmap $egressRaw
+            $uPorts   = if ($untagRaw -is [byte[]]) { Get-PortsFromBitmap $untagRaw } else { @() }
+            $tPorts   = $allPorts | Where-Object { $_ -notin $uPorts }
+            $taggedPorts   = if ($tPorts) { ($tPorts | Sort-Object) -join ", " } else { "-" }
+            $untaggedPorts = if ($uPorts) { ($uPorts | Sort-Object) -join ", " } else { "-" }
+        }
+
+        $displayName = if ($vlanName) { $vlanName } else { "VLAN$vid" }
+        Write-Host ("   VLAN {0,4}  [{1,-20}]  Tagged: {2,-20}  Untagged: {3}" -f $vid, $displayName, $taggedPorts, $untaggedPorts)
+
+        $results.Add([PSCustomObject]@{
+            IP       = $IP
+            VLAN_ID  = $vid
+            Name     = $displayName
+            Tagged   = $taggedPorts
+            Untagged = $untaggedPorts
+        })
+    }
+
+    if ($results.Count -eq 0) {
+        Write-Warn "Keine VLANs via SNMP gefunden – Bridge-MIB moeglicherweise nicht unterstuetzt"
+        return
+    }
+
+    # CSV speichern
+    if (-not (Test-Path $VlanDir)) { New-Item -ItemType Directory -Path $VlanDir -Force | Out-Null }
+    $safeIP  = $IP -replace "\.", "-"
+    $date    = Get-Date -Format "yyyy-MM-dd"
+    $csvPath = Join-Path $VlanDir "vlans_HPE_${safeIP}_${date}.csv"
+    $results | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8 -Delimiter ";"
+    Write-OK "VLAN-CSV gespeichert: $csvPath ($($results.Count) VLANs)"
+}
+
 function Get-HPESNMPInfo {
     param([string]$IP, [string]$Community = "public")
     Write-Step "SNMP-Abfrage ($IP, Community: $Community)..."
@@ -811,6 +1113,7 @@ function Get-HPESNMPInfo {
     $logEntry = "$(Get-Date -Format 'yyyy-MM-dd HH:mm') | HPE SNMP | $IP | Config-Backup: MANUELL ERFORDERLICH"
     Add-Content -Path $logFile -Value $logEntry
     Write-OK "Log-Eintrag gesetzt: $logFile"
+    Get-HPEVLANsSNMP -IP $IP -Community $Community -VlanDir $VlanDir
 }
 
 
@@ -942,8 +1245,10 @@ if ($modus -eq "1" -or $modus -eq "4" -or $modus -eq "5") {
 
     $backupDir = "C:\temp\Switch_Wartung\Backup"
 
+    $vlanDir = "C:\temp\Switch_Wartung\VLANs"
+
     foreach ($ip in $arubaIPs) {
-        Start-ArubaWartung -IP $ip -Credential $arubaCredential -BackupDir $backupDir
+        Start-ArubaWartung -IP $ip -Credential $arubaCredential -BackupDir $backupDir -VlanDir $vlanDir
     }
 }
 
@@ -958,8 +1263,10 @@ if ($modus -eq "3" -or $modus -eq "4" -or $modus -eq "5") {
     $hpeCommunityInput = Read-Host "Community"
     $hpeCommunity = if ($hpeCommunityInput.Trim() -ne "") { $hpeCommunityInput.Trim() } else { "public" }
 
+    $vlanDir = "C:\temp\Switch_Wartung\VLANs"
+
     foreach ($ip in $hpeIPs) {
-        Start-HPEWartung -IP $ip -Community $hpeCommunity
+        Start-HPEWartung -IP $ip -Community $hpeCommunity -VlanDir $vlanDir
     }
 }
 
