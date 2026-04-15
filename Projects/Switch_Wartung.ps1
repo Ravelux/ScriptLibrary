@@ -296,13 +296,14 @@ function Start-ArubaConfigBackup {
 
 function Get-ArubaVLANs {
     # Eigene SSH-Session fuer VLANs – frische Verbindung, kein Buffer-Problem
-    param([string]$IP, [PSCredential]$Credential, [string]$VlanDir)
+    param([string]$IP, [string]$SSHUser, [string]$VlanDir)
     Write-Step "VLANs abfragen (neue Session)..."
 
-    # Kennwort für VLAN-Session separat abfragen
-    Write-Host "   SSH-Kennwort fuer VLAN-Session ($IP):" -ForegroundColor Yellow
+    # Zugangsdaten fuer VLAN-Session separat abfragen
+    Write-Host "   Zugangsdaten fuer VLAN-Session ($IP):" -ForegroundColor Yellow
+    $vlanUser = Read-Host "Benutzername"
     $vlanPass = Read-Host "Kennwort" -AsSecureString
-    $vlanCred = New-Object System.Management.Automation.PSCredential($Credential.UserName, $vlanPass)
+    $vlanCred = New-Object System.Management.Automation.PSCredential($vlanUser, $vlanPass)
 
     # Neue dedizierte Session aufbauen
     $sid = New-ArubaSession -IP $IP -Credential $vlanCred
@@ -406,7 +407,7 @@ function Get-ArubaVLANs {
 }
 
 function Start-ArubaWartung {
-    param([string]$IP, [PSCredential]$Credential, [string]$BackupDir, [string]$VlanDir)
+    param([string]$IP, [PSCredential]$Credential, [string]$BackupDir, [string]$VlanDir, [string]$arubaUser)
     Write-Header "Aruba Switch: $IP"
 
     $sessionId = New-ArubaSession -IP $IP -Credential $Credential
@@ -1260,7 +1261,7 @@ if ($modus -eq "1" -or $modus -eq "4" -or $modus -eq "5") {
     $vlanDir = "C:\temp\Switch_Wartung\VLANs"
 
     foreach ($ip in $arubaIPs) {
-        Start-ArubaWartung -IP $ip -Credential $arubaCredential -BackupDir $backupDir -VlanDir $vlanDir
+        Start-ArubaWartung -IP $ip -Credential $arubaCredential -BackupDir $backupDir -VlanDir $vlanDir -arubaUser $arubaUser
     }
 }
 
