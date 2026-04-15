@@ -14,7 +14,14 @@
       "WebFetch(domain:www.openjarvis.org)",
       "Bash(python3:*)",
       "Bash(pip list:*)",
-      "Bash(python \"Z:\\\\Ticket_Export\\\\ticket_auswertung.py\")"
+      "Bash(python \"Z:\\\\Ticket_Export\\\\ticket_auswertung.py\")",
+      "Read(//z/Dokumentation-Script/**)",
+      "Bash([ -d \"/z/Dokumentation-Script\" ])",
+      "Read(//c/Users/Michael/.claude/**)",
+      "Read(//c/Users/Michael/.claude/projects/**)",
+      "Bash(grep -l \"ITDokumentation\\\\|Get-ITDokumentation\\\\|Dokumentation-Script\" \"C:/Users/Michael/.claude/projects/z--ScriptLibrary/\"*.jsonl)",
+      "Bash(awk 'NR==943 || NR==947 || NR==953 || NR==957' app.js)",
+      "Bash(node -e ':*)"
     ]
   }
 }
