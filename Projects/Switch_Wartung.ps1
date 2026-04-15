@@ -299,8 +299,13 @@ function Get-ArubaVLANs {
     param([string]$IP, [PSCredential]$Credential, [string]$VlanDir)
     Write-Step "VLANs abfragen (neue Session)..."
 
+    # Kennwort für VLAN-Session separat abfragen
+    Write-Host "   SSH-Kennwort fuer VLAN-Session ($IP):" -ForegroundColor Yellow
+    $vlanPass = Read-Host "Kennwort" -AsSecureString
+    $vlanCred = New-Object System.Management.Automation.PSCredential($Credential.UserName, $vlanPass)
+
     # Neue dedizierte Session aufbauen
-    $sid = New-ArubaSession -IP $IP -Credential $Credential
+    $sid = New-ArubaSession -IP $IP -Credential $vlanCred
     if ($sid -lt 0) { Write-Warn "VLAN-Session fehlgeschlagen"; return }
 
     $vlanStream = New-ArubaStream -SessionId $sid
@@ -1057,7 +1062,7 @@ function Get-HPEVLANsSNMP {
 }
 
 function Get-HPESNMPInfo {
-    param([string]$IP, [string]$Community = "public")
+    param([string]$IP, [string]$Community = "public", [string]$VlanDir)
     Write-Step "SNMP-Abfrage ($IP, Community: $Community)..."
 
     $sysDescr  = Get-SnmpValue -IP $IP -Community $Community -OID "1.3.6.1.2.1.1.1.0"
@@ -1115,6 +1120,13 @@ function Get-HPESNMPInfo {
     Write-OK "Log-Eintrag gesetzt: $logFile"
     Get-HPEVLANsSNMP -IP $IP -Community $Community -VlanDir $VlanDir
 }
+
+function Start-HPEWartung {
+    param([string]$IP, [string]$Community = "public", [string]$VlanDir)
+    Write-Header "HPE OfficeConnect Switch: $IP"
+    Get-HPESNMPInfo -IP $IP -Community $Community -VlanDir $VlanDir
+}
+
 
 
 # ------------------------------------------------------------------------------
