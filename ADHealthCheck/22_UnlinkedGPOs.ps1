@@ -28,23 +28,31 @@ param(
 )
 
 function Get-GpoLinksFromReportXml {
-  param(
-    [Parameter(Mandatory)]
-    [xml]$XmlDoc
-  )
+    param(
+        [Parameter(Mandatory)]
+        [xml]$XmlDoc
+    )
 
-  # Robust: per XPath suchen, weil die Struktur je nach Version leicht variiert
-  $somNodes = $XmlDoc.SelectNodes("//LinksTo/SOM")
-  $links = @()
+    $links = @()
 
-  foreach ($n in @($somNodes)) {
-    # SOMPath ist in der Regel ein String-Node
-    $p = $n.SOMPath
-    if ($p) { $links += [string]$p }
-  }
+    # Get-GPOReport liefert ein GPO-Root-Element mit Namespace.
+    # Über die native PowerShell XML-Dot-Notation navigieren wir
+    # namespace-agnostisch durch den Baum.
+    $gpoNode = $XmlDoc.GPO
+    if (-not $gpoNode) { return $links }
 
-  # Duplikate entfernen
-  $links | Sort-Object -Unique
+    $linksToNode = $gpoNode.LinksTo
+    if (-not $linksToNode) { return $links }
+
+    # LinksTo kann ein einzelnes Objekt oder ein Array sein
+    foreach ($entry in @($linksToNode)) {
+        $somPath = $entry.SOMPath
+        if ($somPath) {
+            $links += [string]$somPath
+        }
+    }
+
+    $links | Sort-Object -Unique
 }
 
 function Get-UnlinkedGpos {
