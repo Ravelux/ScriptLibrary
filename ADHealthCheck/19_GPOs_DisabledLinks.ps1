@@ -100,11 +100,10 @@ foreach ($t in $targets) {
     foreach ($l in $inh.GpoLinks) {
         $gpoId = if ($l.GpoId) { $l.GpoId.ToString() } else { "" }
 
-        if ($l.Enabled -and $gpoId) {
+        if ([bool]$l.Enabled -and $gpoId) {
             $hasEnabledLink[$gpoId] = $true
         }
-
-        if (-not $l.Enabled) {
+        if (-not [bool]$l.Enabled) {
             $rows.Add([pscustomobject]@{
                 Domain      = $DomainDns
                 TargetType  = $t.Type
@@ -112,7 +111,7 @@ foreach ($t in $targets) {
                 TargetDN    = $t.DN
                 DisplayName = $l.DisplayName
                 GpoId       = $gpoId
-                LinkEnabled = $l.Enabled
+                LinkEnabled = [bool]$l.Enabled
                 Enforced    = $l.Enforced
                 Order       = $l.Order
                 Note        = ""
@@ -127,7 +126,7 @@ $rowsSorted | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ReportDisabled
 
 # Kandidaten: GPOs die nur deaktivierte Links haben
 $disabledGpoIds = $rowsSorted |
-    Where-Object { $_.GpoId -and (-not $_.LinkEnabled) } |
+    Where-Object { $_.GpoId -and ($_.LinkEnabled -eq $false) } |
     Select-Object -ExpandProperty GpoId -Unique
 
 $candidateIds = foreach ($id in $disabledGpoIds) {
@@ -171,7 +170,7 @@ $candidatesSorted = $candidates | Sort-Object @{Expression = 'DisabledLinkCount'
 $candidatesSorted | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ReportCandidates
 
 # === Ausgabe ===
-$disabledLinkCount = ($rowsSorted | Where-Object { $_.GpoId -and (-not $_.LinkEnabled) }).Count
+$disabledLinkCount = ($rowsSorted | Where-Object { $_.GpoId -and ($_.LinkEnabled -eq $false) }).Count
 Write-Host "Ergebnis:"
 Write-Host "- Disabled Links gefunden: $disabledLinkCount"
 Write-Host "- GPO Kandidaten (nur deaktivierte Links): $($candidatesSorted.Count)"
