@@ -107,9 +107,9 @@ foreach ($gpo in $allGpos) {
     }
 }
 
-$rowsSorted       = $rows       | Sort-Object DisplayName, LinkTarget
-$candidatesSorted = $candidates | Sort-Object @{Expression = 'DisabledLinkCount'; Descending = $true },
-    @{Expression = 'DisplayName'; Descending = $false }
+$rowsSorted       = @($rows       | Sort-Object DisplayName, LinkTarget)
+$candidatesSorted = @($candidates | Sort-Object @{Expression = 'DisabledLinkCount'; Descending = $true },
+    @{Expression = 'DisplayName'; Descending = $false })
 
 $rowsSorted       | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ReportDisabledLinks
 $candidatesSorted | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ReportCandidates
