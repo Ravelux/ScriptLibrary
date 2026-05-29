@@ -47,7 +47,7 @@ New-Item -ItemType Directory -Path $QuarantinePath -Force | Out-Null
 
 $AllowedExtensions = @(
     ".bat",".exe",".nix",".vbs",".pol",".reg",".xml",".admx",".adml",
-    ".inf",".ini",".adm",".kix",".msi",".ps1",".cmd",".ico"
+    ".inf",".ini",".adm",".kix",".msi",".ps1",".cmd",".ico",".cmtx",".txt"
 )
 
 $sysvol = "\\$DomainDns\SYSVOL\$DomainDns\Policies"
