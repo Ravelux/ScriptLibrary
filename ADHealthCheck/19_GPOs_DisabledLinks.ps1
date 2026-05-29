@@ -6,7 +6,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$ReportDir  = "",
+    [string]$ReportDir = "",
     [switch]$ExcludeOUs
 )
 
@@ -42,7 +42,7 @@ else {
 New-Item -ItemType Directory -Path $BaseReportDir -Force | Out-Null
 
 # === Modules ===
-Import-Module GroupPolicy -ErrorAction Stop
+Import-Module GroupPolicy    -ErrorAction Stop
 Import-Module ActiveDirectory -ErrorAction Stop
 
 # Domain ermitteln
@@ -59,121 +59,65 @@ Write-Host "Domain: $DomainDns"
 Write-Host "Report Ordner: $BaseReportDir"
 Write-Host ""
 
-# Targets sammeln (Domain + optional alle OUs)
-$targets = New-Object System.Collections.Generic.List[object]
-$targets.Add([pscustomobject]@{ Type = "Domain"; DN = $DomainDN; Name = $DomainDns })
+# === Alle GPOs via XML auslesen ===
+Write-Host "Lese alle GPOs aus..." -ForegroundColor Cyan
+$allGpos = Get-GPO -All -Domain $DomainDns
 
-if (-not $ExcludeOUs) {
-    $ous = Get-ADOrganizationalUnit -Server $DomainDns -Filter * -Properties DistinguishedName, Name |
-        Sort-Object DistinguishedName
-    foreach ($ou in $ous) {
-        $targets.Add([pscustomobject]@{ Type = "OU"; DN = $ou.DistinguishedName; Name = $ou.Name })
-    }
-}
-
-# Tracking: pro GPO ob irgendwo ein aktiver Link existiert
-$hasEnabledLink = @{}
-
-# Disabled-Link Rows
-$rows = New-Object System.Collections.Generic.List[object]
-
-foreach ($t in $targets) {
-    try {
-        $inh = Get-GPInheritance -Target $t.DN -ErrorAction Stop
-    }
-    catch {
-        $rows.Add([pscustomobject]@{
-            Domain      = $DomainDns
-            TargetType  = $t.Type
-            TargetName  = $t.Name
-            TargetDN    = $t.DN
-            DisplayName = ""
-            GpoId       = ""
-            LinkEnabled = ""
-            Enforced    = ""
-            Order       = ""
-            Note        = ("Get-GPInheritance failed: " + $_.Exception.Message)
-        })
-        continue
-    }
-
-    foreach ($l in $inh.GpoLinks) {
-        $gpoId = if ($l.GpoId) { $l.GpoId.ToString() } else { "" }
-
-        if ([bool]$l.Enabled -and $gpoId) {
-            $hasEnabledLink[$gpoId] = $true
-        }
-        if (-not [bool]$l.Enabled) {
-            $rows.Add([pscustomobject]@{
-                Domain      = $DomainDns
-                TargetType  = $t.Type
-                TargetName  = $t.Name
-                TargetDN    = $t.DN
-                DisplayName = $l.DisplayName
-                GpoId       = $gpoId
-                LinkEnabled = [bool]$l.Enabled
-                Enforced    = $l.Enforced
-                Order       = $l.Order
-                Note        = ""
-            })
-        }
-    }
-}
-
-# Report: Disabled Links
-$rowsSorted = $rows | Sort-Object TargetType, TargetDN, Order, DisplayName
-$rowsSorted | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ReportDisabledLinks
-
-# Kandidaten: GPOs die nur deaktivierte Links haben
-$disabledGpoIds = $rowsSorted |
-    Where-Object { $_.GpoId -and ($_.LinkEnabled -eq $false) } |
-    Select-Object -ExpandProperty GpoId -Unique
-
-$candidateIds = foreach ($id in $disabledGpoIds) {
-    if (-not $hasEnabledLink.ContainsKey($id)) { $id }
-}
-
+$rows       = New-Object System.Collections.Generic.List[object]
 $candidates = New-Object System.Collections.Generic.List[object]
-foreach ($id in $candidateIds) {
-    try {
-        $g         = Get-GPO -Guid $id -ErrorAction Stop
-        $linkCount = ($rowsSorted | Where-Object { $_.GpoId -eq $id }).Count
+
+foreach ($gpo in $allGpos) {
+    [xml]$report = Get-GPOReport -Guid $gpo.Id -ReportType XML -Domain $DomainDns
+
+    # SelectNodes gibt immer eine XmlNodeList zurueck -- auch bei 0 oder 1 Treffer
+    $linksArray    = $report.GPO.SelectNodes("LinksTo")
+    $disabledLinks = $linksArray | Where-Object { $_.Enabled -eq "false" }
+    $enabledLinks  = $linksArray | Where-Object { $_.Enabled -eq "true" }
+
+    if ($disabledLinks.Count -eq 0) { continue }
+
+    # Alle deaktivierten Links als Row speichern
+    foreach ($link in $disabledLinks) {
+        $rows.Add([pscustomobject]@{
+            Domain           = $DomainDns
+            DisplayName      = $gpo.DisplayName
+            GpoId            = $gpo.Id.ToString()
+            LinkTarget       = $link.SOMPath
+            LinkTargetName   = $link.SOMName
+            LinkEnabled      = $false
+            CreationTime     = $gpo.CreationTime
+            ModificationTime = $gpo.ModificationTime
+            Owner            = $gpo.Owner
+        })
+    }
+
+    # Kandidat: GPO hat deaktivierte Links aber KEINEN einzigen aktiven Link
+    if ($enabledLinks.Count -eq 0) {
         $candidates.Add([pscustomobject]@{
             Domain               = $DomainDns
-            DisplayName          = $g.DisplayName
-            GpoId                = $g.Id.ToString()
-            DisabledLinkCount    = $linkCount
-            CreationTime         = $g.CreationTime
-            ModificationTime     = $g.ModificationTime
-            Owner                = $g.Owner
+            DisplayName          = $gpo.DisplayName
+            GpoId                = $gpo.Id.ToString()
+            DisabledLinkCount    = $disabledLinks.Count
+            CreationTime         = $gpo.CreationTime
+            ModificationTime     = $gpo.ModificationTime
+            Owner                = $gpo.Owner
             CandidateForDeletion = $true
             Note                 = "Kein aktiver Link gefunden. Nur deaktivierte Links."
         })
     }
-    catch {
-        $candidates.Add([pscustomobject]@{
-            Domain               = $DomainDns
-            DisplayName          = ""
-            GpoId                = $id
-            DisabledLinkCount    = ($rowsSorted | Where-Object { $_.GpoId -eq $id }).Count
-            CreationTime         = ""
-            ModificationTime     = ""
-            Owner                = ""
-            CandidateForDeletion = $true
-            Note                 = ("Get-GPO failed: " + $_.Exception.Message)
-        })
-    }
 }
 
+$rowsSorted       = $rows       | Sort-Object DisplayName, LinkTarget
 $candidatesSorted = $candidates | Sort-Object @{Expression = 'DisabledLinkCount'; Descending = $true },
     @{Expression = 'DisplayName'; Descending = $false }
+
+$rowsSorted       | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ReportDisabledLinks
 $candidatesSorted | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ReportCandidates
 
 # === Ausgabe ===
-$disabledLinkCount = ($rowsSorted | Where-Object { $_.GpoId -and ($_.LinkEnabled -eq $false) }).Count
 Write-Host "Ergebnis:"
-Write-Host "- Disabled Links gefunden: $disabledLinkCount"
-Write-Host "- GPO Kandidaten (nur deaktivierte Links): $($candidatesSorted.Count)"
+Write-Host "- Disabled Links gefunden         : $($rowsSorted.Count)"
+Write-Host "- GPO Kandidaten (nur deaktiviert): $($candidatesSorted.Count)"
 Write-Host ""
 Write-Host "CSV Reports:"
 Write-Host "- $ReportDisabledLinks"
@@ -186,8 +130,8 @@ if ($candidatesSorted.Count -gt 0) {
         Format-Table -AutoSize
     Write-Host ""
 
-    if (Read-YesNo "Sollen GPOs gelöscht werden, die nur deaktivierte Links haben?") {
-        $doBackup  = Read-YesNo "Vor dem Löschen je GPO ein Backup erstellen?"
+    if (Read-YesNo "Sollen GPOs geloescht werden, die nur deaktivierte Links haben?") {
+        $doBackup  = Read-YesNo "Vor dem Loeschen je GPO ein Backup erstellen?"
         $backupDir = Join-Path $BaseReportDir "GPO-Backups"
         if ($doBackup) {
             New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
@@ -198,7 +142,7 @@ if ($candidatesSorted.Count -gt 0) {
         foreach ($c in $candidatesSorted) {
             if ([string]::IsNullOrWhiteSpace($c.GpoId)) { continue }
 
-            if (-not (Read-YesNo ("GPO löschen: '$($c.DisplayName)' ($($c.GpoId))?"))) {
+            if (-not (Read-YesNo ("GPO loeschen: '$($c.DisplayName)' ($($c.GpoId))?"))) {
                 $remRows.Add([pscustomobject]@{
                     Domain      = $DomainDns
                     DisplayName = $c.DisplayName
@@ -211,8 +155,7 @@ if ($candidatesSorted.Count -gt 0) {
                 continue
             }
 
-            $ok   = $false
-            $note = ""
+            $ok = $false; $note = ""
             try {
                 if ($doBackup) {
                     Backup-GPO -Guid $c.GpoId -Path $backupDir `
