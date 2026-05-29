@@ -70,7 +70,9 @@ foreach ($gpo in $allGpos) {
     [xml]$report = Get-GPOReport -Guid $gpo.Id -ReportType XML -Domain $DomainDns
 
     # SelectNodes gibt immer eine XmlNodeList zurueck -- auch bei 0 oder 1 Treffer
-    $linksArray    = $report.GPO.SelectNodes("LinksTo")
+    $ns = New-Object System.Xml.XmlNamespaceManager($report.NameTable)
+    $ns.AddNamespace("gp", "http://www.microsoft.com/GroupPolicy/Settings")
+    $linksArray    = $report.GPO.SelectNodes("gp:LinksTo", $ns)
     $disabledLinks = $linksArray | Where-Object { $_.Enabled -eq "false" }
     $enabledLinks  = $linksArray | Where-Object { $_.Enabled -eq "true" }
 
